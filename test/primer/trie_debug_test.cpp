@@ -37,7 +37,7 @@ TEST(TrieDebugger, TestCase) {
       default:
         break;
     }
-    trie = trie.Put<uint32_t>(key, value);
+    trie = trie.template Put<uint32_t>(key, value);
   }
 
   // Put a breakpoint here.
