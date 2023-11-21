@@ -15,10 +15,12 @@
 #include <list>
 #include <memory>
 #include <mutex>  // NOLINT
+#include <shared_mutex>
 #include <unordered_map>
 
 #include "buffer/lru_k_replacer.h"
 #include "common/config.h"
+#include "common/macros.h"
 #include "recovery/log_manager.h"
 #include "storage/disk/disk_scheduler.h"
 #include "storage/page/page.h"
@@ -190,8 +192,18 @@ class BufferPoolManager {
   std::unique_ptr<LRUKReplacer> replacer_;
   /** List of free frames that don't have any pages on them. */
   std::list<frame_id_t> free_list_;
-  /** This latch protects shared data structures. We recommend updating this comment to describe what it protects. */
-  std::mutex latch_;
+  /** 
+    Overview of protection policy:
+    global_latch_ protects page_table_, free_list_, replacer_
+    pages_latch_ protects each page
+    In order to call replacer_->Evict, need exclusive lock on global_latch_. This is alright since Evict is always called
+    in the context of getting a free frame.
+    In order to call replacer_->SetEvictable, need shared lock on global_latch_ and lock on pages_latch_[frame_id].
+    The shared lock is needed because we need to protect the replacer_ from calls to Evict, i.e. we need an intersection
+    of locks held between Evict and SetEvictable.
+   */
+  std::shared_mutex global_latch_;
+  std::vector<std::mutex> pages_latch_;
 
   /**
    * @brief Allocate a page on disk. Caller should acquire the latch before calling this function.
@@ -208,5 +220,8 @@ class BufferPoolManager {
   }
 
   // TODO(student): You may add additional private members and helper functions
+  auto FindFreeFrame() -> std::optional<frame_id_t>;
+
+  void FlushPage(Page &page);
 };
 }  // namespace bustub

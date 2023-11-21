@@ -15,8 +15,12 @@
 #include <limits>
 #include <list>
 #include <mutex>  // NOLINT
+#include <shared_mutex>
 #include <unordered_map>
+#include <set>
 #include <vector>
+#include <queue>
+#include <optional>
 
 #include "common/config.h"
 #include "common/macros.h"
@@ -25,16 +29,20 @@ namespace bustub {
 
 enum class AccessType { Unknown = 0, Lookup, Scan, Index };
 
-class LRUKNode {
- private:
+struct LRUKNode {
+    explicit LRUKNode(size_t timestamp_added) : timestamp_added_(timestamp_added) {
+        history_.push(timestamp_added);
+    }
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
   // Remove maybe_unused if you start using them. Feel free to change the member variables as you want.
 
-  [[maybe_unused]] std::list<size_t> history_;
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] frame_id_t fid_;
-  [[maybe_unused]] bool is_evictable_{false};
+    std::queue<size_t> history_;
+    size_t timestamp_added_;
+    bool is_evictable_{false};
+    bool present_in_pq_{true};
 };
+
+
 
 /**
  * LRUKReplacer implements the LRU-k replacement policy.
@@ -98,6 +106,7 @@ class LRUKReplacer {
    * @param access_type type of access that was received. This parameter is only needed for
    * leaderboard tests.
    */
+
   void RecordAccess(frame_id_t frame_id, AccessType access_type = AccessType::Unknown);
 
   /**
@@ -148,14 +157,44 @@ class LRUKReplacer {
   auto Size() -> size_t;
 
  private:
+
+    static size_t constexpr TIMESTAMP_NEG_INF = 0;
+    struct PQNode
+    {
+        frame_id_t frame_id_;
+        // if fewer than k timestamps, this will be TIMESTAMP_NEG_INF
+        size_t kth_last_timestamp_;
+        size_t earliest_timestamp_;
+        
+        explicit PQNode(frame_id_t frame_id, size_t k, LRUKNode const &lruk_node)
+            : 
+            frame_id_(frame_id), 
+            kth_last_timestamp_(lruk_node.history_.size() == k ? lruk_node.history_.front() : TIMESTAMP_NEG_INF),
+            earliest_timestamp_(lruk_node.history_.front())
+        {
+        }
+
+        // We want to prioritize the node with the earliest `kth_last_timestamp_`,
+        // then break ties by earliest `earliest_timestamp_`.
+        // Need to break ties since kth_last_timestamp_ can be TIMESTAMP_NEG_INF for multiple nodes.
+        auto operator<(PQNode const &other) const noexcept -> bool
+        {
+            return std::tie(kth_last_timestamp_, earliest_timestamp_) > std::tie(other.kth_last_timestamp_, other.earliest_timestamp_);
+        }
+    };
+    
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
-  [[maybe_unused]] std::unordered_map<frame_id_t, LRUKNode> node_store_;
-  [[maybe_unused]] size_t current_timestamp_{0};
-  [[maybe_unused]] size_t curr_size_{0};
-  [[maybe_unused]] size_t replacer_size_;
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] std::mutex latch_;
+    size_t const replacer_size_;
+    std::vector<std::optional<LRUKNode>> node_store_;
+    std::priority_queue<PQNode> pq_;
+    size_t current_timestamp_{1};
+    size_t k_;
+    size_t num_evictable_{};
+    std::shared_mutex global_latch_;
+    std::mutex num_evictable_latch_;
+    std::mutex current_timestamp_latch_;
+    std::vector<std::mutex> node_latches_;
 };
 
 }  // namespace bustub

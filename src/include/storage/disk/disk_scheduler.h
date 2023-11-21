@@ -42,6 +42,16 @@ struct DiskRequest {
   std::promise<bool> callback_;
 };
 
+struct WorkerShard
+{
+    Channel<std::optional<DiskRequest>> request_queue_;
+    DiskManager *disk_manager_;
+    std::thread worker_thread_;
+    explicit WorkerShard(DiskManager *disk_manager);
+    WorkerShard(WorkerShard const &) = delete;
+    void StartWorkerThread();
+};
+
 /**
  * @brief The DiskScheduler schedules disk read and write operations.
  *
@@ -84,12 +94,16 @@ class DiskScheduler {
   auto CreatePromise() -> DiskSchedulerPromise { return {}; };
 
  private:
+    static size_t constexpr NUM_WORKERS = 4;
   /** Pointer to the disk manager. */
-  DiskManager *disk_manager_ __attribute__((__unused__));
+  DiskManager *disk_manager_;
   /** A shared queue to concurrently schedule and process requests. When the DiskScheduler's destructor is called,
    * `std::nullopt` is put into the queue to signal to the background thread to stop execution. */
   Channel<std::optional<DiskRequest>> request_queue_;
   /** The background thread responsible for issuing scheduled requests to the disk manager. */
   std::optional<std::thread> background_thread_;
+    
+    auto ShardHash(size_t page_id) -> size_t;
+    std::array<std::optional<WorkerShard>, NUM_WORKERS> workers_;
 };
 }  // namespace bustub
